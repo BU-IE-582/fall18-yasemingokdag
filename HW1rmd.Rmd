@@ -356,6 +356,50 @@ legend("topleft",c("Bin Probability Average", "Actual Fraction") ,col = 8 , lty 
 For some bins, like bin [0.65,0.7) , the performance gets better as the years passed. However, we cannot say that this holds for all bins. For example bin [0.5,0.55) has worse performance on recent years. 
 In general, the results are consistent with what we observed on part a as expected. As the fraction moves away from 0.5, accurracy deteriorates here as well. The bookmaker's variance from actual fraction stays at a certain level, this might explain its overall success. 
 
+## Task 2
+
+
+For this task, I picked the bookmaker that I have evaluated on part a. For this bookmaker, I aimed to find a match so that the odds on different odd types drastically changes. I was hoping to find a strict transition from one oddtype to the other, such change might hhave been interpreted as an information change. However, I was not able to find such drastic change on odds. 
+
+The change that I have found on match watford vs manchester city shows that odd1 decreased significantly within time, Given the information that the match ended with score 0:5 this is a self-explanatory result. Graph examined is below, significant change in odds is visible   
+
+``` {r secondtask,  include=FALSE,  eval = TRUE ,  message= FALSE}
+
+
+secondtaskdata <- oddsandmatch[betType == "1x2" & !is.na(score) & bookmaker == top_bookmaker] 
+secondtaskdata <- secondtaskdata[, c("home_score", "away_score") := tstrsplit(score, ":", fixed=TRUE)]
+secondtaskdata <- secondtaskdata[,-c("totalhandicap"), with=F]
+
+
+oddcount_match <- secondtaskdata[, list(Count = length(unique(odd))), by = c("matchId")]
+oddcount_match[order(-Count)]
+
+secondtaskdata <- secondtaskdata[, DateTime := anytime(date)]
+
+
+match_odds <- secondtaskdata[, list(max_odd = max(odd), min_odd = min(odd)), by = c("matchId", "oddtype")]
+match_odds[, odd_diff := max_odd-min_odd]
+match_odds_avg_diff <- match_odds[, list(avg_diff = mean(odd_diff)), by = c("matchId")]
+match_odds_avg_diff[order(-avg_diff)]
+
+
+singlematch <- secondtaskdata[matchId == "I12BNg0Q"]
+
+singlematch <- singlematch[oddtype == "odd1", od_id := 1]
+singlematch <- singlematch[oddtype == "odd2", od_id := 2]
+singlematch <- singlematch[oddtype == "oddX", od_id := 3]
+
+```
+
+``` {r secondtask_plot,  include=TRUE,  eval = TRUE ,echo = FALSE,  message= FALSE}
+
+plot(singlematch[order(oddtype, DateTime)]$DateTime, singlematch[order(oddtype, date)]$odd 
+     , pch = singlematch$od_id , col = singlematch$od_id , xlab = "Hours", ylab = "Odd", main = "Odd Change"  )
+
+legend("topleft",unique(singlematch$oddtype) ,col=unique(singlematch$od_id) ,pch= unique(singlematch$od_id),bty = "o", xjust =
+         1,yjust=1,x.intersp = 0.2,y.intersp = 0.6)
+
+```
 
 
 
