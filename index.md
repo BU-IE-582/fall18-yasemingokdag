@@ -2,7 +2,7 @@
 
 ## Week 0
 
-[Here](http://htmlpreview.github.com/?https://github.com/BU-IE-582/fall18-yasemingokdag/blob/master/interesting_examples_yg.html) are the 5 interesting examples that I have found.
+[Here](interesting_examples_yg.html) are the 5 interesting examples that I have found.
 
 ## Week 3
 
@@ -25,5 +25,5 @@ This project is about understanding the behavior of different betting companies 
 use of available information from different sources (odds from different betting companies, team status
 and etc.).
 
-[Here](http://htmlpreview.github.com/?https://github.com/BU-IE-582/fall18-yasemingokdag/blob/master/HW1rmd.html) is the result report for the first part of this project 
+[Here](HW1rmd.html) is the result report for the first part of this project 
 
