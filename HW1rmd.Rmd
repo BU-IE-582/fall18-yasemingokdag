@@ -1,0 +1,368 @@
+---
+title: "IE582_HW1"
+author: "yasemin gokdag"
+date: "October 18, 2018"
+output: html_document
+---
+
+## Task1 
+
+For this task, the upload required library, and read data is read as follows 
+
+```{r setup, include=TRUE, eval = TRUE, message= FALSE, warning= FALSE}
+
+require(data.table)
+require(anytime)
+require(ggplot2)
+
+matchdata <- readRDS('C:/Users/yasemin/Downloads/df9b1196-e3cf-4cc7-9159-f236fe738215_matches (1).rds', refhook = NULL)
+matchdata <- as.data.table(matchdata)
+
+odds <- readRDS('C:/Users/yasemin/Downloads/df9b1196-e3cf-4cc7-9159-f236fe738215_odd_details (1).rds', refhook = FALSE)
+odds <- as.data.table(odds)
+
+```
+
+### Part A 
+
+After the data is uploaded, first I checked whether there are duplicate rows or not. Match data had duplicate rows, those are 
+cleaned. Odds data is unique.
+
+Having cleaned the data, I joined two tables and filtered accoring to the description on task1, any match that is not played yet is removed since they are out of scope. 
+
+```{r data_manipulation, include=FALSE, eval = TRUE, message= FALSE}
+
+#First we check for uniqueness of the data.
+matchdata <- matchdata[, idCount := 1:.N, list(matchId)]
+matchdata[idCount > 1]
+
+#data is not unique, we need to find unique entries 
+
+#remove columns that are not necessary 
+matchdata <- matchdata[,-c( "idCount"), with=F]
+#get unique entries 
+matchdata <- unique(matchdata)
+
+
+odds <- odds[, rank := 1:.N, list(matchId,betType,oddtype,bookmaker,date,totalhandicap)]
+odds[rank > 1]
+#empty data table. There is no duplicate records, so data on odss data table is unique, we can join two data tables now. 
+
+#remove columns that are not necessary 
+odds <- odds[,-c( "rank"), with=F]
+
+#merge data
+oddsandmatch <- merge(odds,matchdata, by.x= 'matchId' , by.y = 'matchId' , all.y = TRUE )
+#make sure that resulting table is a data table 
+oddsandmatch <- as.data.table(oddsandmatch)
+
+
+#we get rid of match date since we do not need this information, also delete leagueId  and type since there is no information 
+oddsandmatch <- oddsandmatch[,-c( "date.y", "leagueId","type"), with=F]
+setnames(oddsandmatch, 'date.x', 'date')
+
+#Task 1  starts here
+firsttaskdata <- oddsandmatch[betType == 'ou' & totalhandicap == 2.5 ]
+firsttaskdata <- firsttaskdata[, DateTime:=anytime(date)]
+
+#since we are interested in games that are actualized, we delete any NA score matchs 
+firsttaskdata <- firsttaskdata[!is.na(score)]
+```
+
+Initial bets and final bets of bookmakers are found and seperated as two different data tables. All calculations were performed on both seperately.  
+
+``` {r determine_bets, include=FALSE, eval = TRUE, message= FALSE}
+#get initial bets
+initialbets <- firsttaskdata[order(DateTime), rank := 1:.N, list(bookmaker, oddtype, matchId)]
+initialbets <- initialbets[rank == 1 ]
+
+firsttaskdata <- firsttaskdata[,-c( "rank"), with=F]
+
+#get final bets 
+finalbets <- firsttaskdata[order(-DateTime), rank := 1:.N, list(bookmaker, oddtype, matchId)]
+finalbets <- finalbets[rank == 1 ]
+
+firsttaskdata <- firsttaskdata[,-c( "rank"), with=F]
+
+```
+
+Then, odds are tranformed into probabilities. Ratio 1/odds is normalized with bookmakers total (1/odd) value as described in the 
+task introduction
+
+```{r odd_probability, include=FALSE, eval = TRUE, message= FALSE}
+
+#get probabilities for initial bets data 
+#check if any 0 odds to avoid division errors 
+initialbets[ , p1 := 1/odd ]
+initialbets[ , probsum := sum(p1), by = list(bookmaker, matchId)]
+
+initialbets[, probability := p1/probsum ]
+initialbets <- initialbets[,-c("rank","p1","probsum"), with=F]
+
+
+#get probabilities for final bets data 
+#check if any 0 odds to avoid division errors 
+finalbets[ , p1 := 1/odd ]
+finalbets[ , probsum := sum(p1), by = list(bookmaker, matchId)]
+
+finalbets[, probability := p1/probsum ]
+finalbets <- finalbets[,-c("rank","p1","probsum"), with=F]
+
+```
+
+Top 8 bookmakers are chosen based on the count of distinct matches that they offered odds.
+
+``` {r select_bookmakers, include=FALSE, eval = TRUE, message= FALSE}
+#Choose 8 bookmakers based on how many matches the offer odds 
+agg <- initialbets[, list(Count = length(unique(matchId))), by = c("bookmaker")]
+BookmakesSelected <- agg[order(-Count), head(.SD,8)]$bookmaker
+
+setkey(initialbets, bookmaker)
+bookmakersselected_initial <- initialbets[BookmakesSelected]
+bookmakersselected_initial <- as.data.table(bookmakersselected_initial)
+
+setkey(finalbets, bookmaker)
+bookmakersselected_final <- finalbets[BookmakesSelected]
+bookmakersselected_final <- as.data.table(bookmakersselected_final)
+
+```
+
+In order to examine density, a histogram was drawed as follows : 
+
+``` {r histogram, include=TRUE, eval = TRUE, echo = FALSE, message= FALSE}
+
+hist(bookmakersselected_initial[oddtype == 'over']$probability, breaks = seq(0,1,0.02), xlab = "Odd Probability", main = "Odd Density Histogram")
+
+```
+
+Based on the histogram, bins were selected as follows: 
+
+``` {r bins, include=FALSE, eval = TRUE, message= FALSE}
+
+#based on this information, i choose bins to have >= 1000 data points if possible, and remove the bins with <= 1 data point. 
+#so the bins are as follows: 
+
+bins <- cbind(c(0.35,	0.4,	0.45,	0.5,	0.55,	0.6,	0.65,	0.7 )
+            , c(0.4,	0.45,	0.5,	0.55,	0.6,	0.65,	0.7,	0.75) )
+
+bins <- as.data.table(bins)
+setnames(bins, c("Lower", "Upper"))
+
+#set id to each probability bin 
+bins[, id := 1:.N]
+
+```
+
+``` {r print_bins, include=TRUE, eval = TRUE, echo = FALSE, message= FALSE}
+print(bins)
+```
+
+Then probabilities are assigned to bins, bin information is combined with calculated probabilites. 
+Score data is splitted and actual over/total matches fraction is calculated per bookmaker per bin. 
+
+```{r assign_bins, include=FALSE, eval = TRUE, message= FALSE}
+
+#combine bin information with probability data, added dummy column join to be able to perform cross join 
+bins[,join := 1]
+
+bookmakersselected_initial[, join := 1]
+bookmakersselected_final[, join := 1]
+
+
+#we do inner join here, so if a probability does not correspond to any bin, it is removed from data
+crossjoin_initial <- merge(bookmakersselected_initial, bins , by.x ="join", by.y = "join", all.x = TRUE, all.y = TRUE, allow.cartesian = TRUE)
+crossjoin_final <- merge(bookmakersselected_final, bins , by.x ="join", by.y = "join", all.x = TRUE, all.y = TRUE, allow.cartesian = TRUE)
+
+oddswithbins_initial <- crossjoin_initial[Lower <= probability & Upper > probability]
+oddswithbins_final <- crossjoin_final[Lower <= probability & Upper > probability]
+
+#now we calculate real over ratio based on scores 
+oddswithbins_initial <- oddswithbins_initial[, c("home", "away") := tstrsplit(score, ":", fixed=TRUE)]
+oddswithbins_final <- oddswithbins_final[, c("home", "away") := tstrsplit(score, ":", fixed=TRUE)]
+
+oddswithbins_initial <- as.data.table(oddswithbins_initial)
+oddswithbins_final <- as.data.table(oddswithbins_final)
+
+oddswithbins_initial$home = as.numeric(oddswithbins_initial$home)
+oddswithbins_initial$away = as.numeric(oddswithbins_initial$away)
+
+oddswithbins_final$home = as.numeric(oddswithbins_final$home)
+oddswithbins_final$away = as.numeric(oddswithbins_final$away)
+
+oddswithbins_initial <- oddswithbins_initial[,actualscore := home + away]
+oddswithbins_final <- oddswithbins_final[,actualscore := home + away]
+
+
+oddswithbins_initial[actualscore > totalhandicap , over := 1 ]
+oddswithbins_initial[is.na(over), over := 0 ]
+
+oddswithbins_final[actualscore > totalhandicap , over := 1 ]
+oddswithbins_final[is.na(over), over := 0 ]
+
+
+binaverage_initial <- oddswithbins_initial[ oddtype == 'over', list(binAverage = mean(probability)), by = c("bookmaker", "id")]
+binaverage_final <- oddswithbins_final[ oddtype == 'over', list(binAverage = mean(probability)), by = c("bookmaker", "id")]
+
+#
+
+binactual_initial <- oddswithbins_initial [oddtype == 'over', list(actualProb = sum(over)/sum(join)), by = c("bookmaker", "id") ]
+scatter_initial <- merge(binactual_initial, binaverage_initial, by.x = c("bookmaker", "id"), by.y = c("bookmaker", "id"), all.x = TRUE)
+
+binactual_final <- oddswithbins_final [oddtype == 'over', list(actualProb = sum(over)/sum(join)), by = c("bookmaker", "id") ]
+scatter_final <- merge(binactual_final, binaverage_final, by.x = c("bookmaker", "id"), by.y = c("bookmaker", "id"), all.x = TRUE)
+
+BookmakesSelected <- as.data.table(BookmakesSelected)
+BookmakesSelected[,bm_id:=1:.N]
+
+
+scatter_initial <- merge(scatter_initial, BookmakesSelected, by.x = "bookmaker", by.y = "BookmakesSelected", all.y = TRUE)
+scatter_final <- merge(scatter_final, BookmakesSelected, by.x = "bookmaker", by.y = "BookmakesSelected", all.y = TRUE)
+
+```
+
+Initial bets plot is as follows :
+
+``` {r initial_plot , include=TRUE, eval = TRUE, echo = FALSE, message= FALSE}
+
+plot(scatter_initial$actualProb, scatter_initial$binAverage 
+     , pch = scatter_initial$bm_id , col = scatter_initial$bm_id, xlim = c(0,1), ylim = c(0,1), xlab = "Actual Fraction", ylab = "Bin Probability Average", main = "Initial Odds"  )
+legend("topleft",unique(scatter_initial$bookmaker) ,col=unique(scatter_initial$bm_id) ,pch= unique(scatter_initial$bm_id),bty = "o", xjust =
+         1,yjust=1,x.intersp = 0.3,y.intersp = 0.9)
+abline(a=0,b=1,col=1)
+
+```
+
+Final bets plot is as follows : 
+
+
+``` {r final_plot, include=TRUE, eval = TRUE, echo = FALSE , message= FALSE}
+
+plot(scatter_final$actualProb, scatter_final$binAverage 
+     , pch = scatter_final$bm_id , col = scatter_final$bm_id, xlim = c(0,1), ylim = c(0,1) , xlab = "Actual Fraction", ylab = "Bin Probability Average", main = "Final Odds"  )
+legend("topleft",unique(scatter_final$bookmaker) ,col=unique(scatter_final$bm_id) ,pch= unique(scatter_final$bm_id),bty = "o", xjust =
+         1,yjust=1,x.intersp = 0.3,y.intersp = 0.9)
+abline(a=0,b=1,col=1)
+```
+
+As seen in plots, accuracy over bins get better when the bets are finalized. 
+On initial bets, bookmakers such as BetSafe, bet-at-home,Betsson, bet365 perform well.
+On final bets, the ones that were successful on initial bets are still good, the bookmaker Paddy Power significantly improves its performance.
+As actual over fraction moves away from 0.5, we see that accuracy deteriorates. It is worse on initial odds, but better on final odds. This might be because bookmakers can update their odds while the match is played 
+
+### Part B
+
+For this part, bookmaker bet365 is examined since it offered odds for the maximum number of matchs. Than, similar to what is done on part a, odd probabilites and actual over fractions are calculated per year per bin 
+
+``` {r secondpart_select, include=FALSE, eval = TRUE , message= FALSE}
+#Choose top bookmaker to examine performance over years  
+top_bookmaker <- agg[order(-Count), head(.SD,1)]$bookmaker
+top_bookmaker_odds <- oddswithbins_final[bookmaker == top_bookmaker]
+top_bookmaker_odds[, year := year(DateTime)]
+
+top_bookmaker_odds_binaverage <- top_bookmaker_odds[ oddtype == 'over', list(binAverage = mean(probability)), by = c("year", "id")]
+#
+top_bookmaker_odds_binactual <- top_bookmaker_odds [oddtype == 'over', list(actualProb = sum(over)/sum(join)), by = c("year", "id") ]
+top_bookmaker_odds_cumulative <- merge(top_bookmaker_odds_binactual, top_bookmaker_odds_binaverage, by.x = c("year", "id"), by.y = c("year", "id"), all.x = TRUE)
+
+top_bookmaker_odds_cumulative <- top_bookmaker_odds_cumulative[actualProb != 0]
+
+```
+
+The yearly performance per bin is as follows 
+
+``` {r secondpart_plot_1, include=TRUE,  eval = TRUE ,echo = FALSE,  message= FALSE}
+
+plot(top_bookmaker_odds_cumulative[id == 1][order(year)]$year, top_bookmaker_odds_cumulative[id == 1][order(year)]$binAverage, col = 1 , lty = 1, type = "l", ylim = c(0,1), xlab = "Actual Fraction", ylab = "Bin Probability Average", main = "bin [0.35,0.4)" )
+lines(top_bookmaker_odds_cumulative[id == 1][order(year)]$year, top_bookmaker_odds_cumulative[id == 1][order(year)]$actualProb, col = 1 , lty = 2, type = "l", ylim = c(0,1))
+legend("topleft",c("Bin Probability Average", "Actual Fraction") ,col= 1 , lty = c(1,2) ,bty = "o", xjust =
+         1,yjust=1,x.intersp = 0.2,y.intersp = 0.7)
+
+```
+
+
+``` {r secondpart_plot_2, include=TRUE,  eval = TRUE ,echo = FALSE,  message= FALSE}
+
+plot(top_bookmaker_odds_cumulative[id == 2][order(year)]$year, top_bookmaker_odds_cumulative[id == 2][order(year)]$binAverage, col = 2 , lty = 1, type = "l", ylim = c(0,1), xlab = "Actual Fraction", ylab = "Bin Probability Average", main = "bin [0.4,0.45)" )
+lines(top_bookmaker_odds_cumulative[id == 2][order(year)]$year, top_bookmaker_odds_cumulative[id == 2][order(year)]$actualProb, col = 2 , lty = 2, type = "l", ylim = c(0,1))
+legend("topleft",c("Bin Probability Average", "Actual Fraction") ,col= 2 , lty = c(1,2) ,bty = "o", xjust =
+         1,yjust=1,x.intersp = 0.2,y.intersp = 0.7)
+
+```
+
+
+
+``` {r secondpart_plot_3, include=TRUE,  eval = TRUE ,echo = FALSE,  message= FALSE}
+
+plot(top_bookmaker_odds_cumulative[id == 3][order(year)]$year, top_bookmaker_odds_cumulative[id == 3][order(year)]$binAverage, col = 3 , lty = 1, type = "l", ylim = c(0,1), xlab = "Actual Fraction", ylab = "Bin Probability Average", main = "bin [0.45,0.5)" )
+lines(top_bookmaker_odds_cumulative[id == 3][order(year)]$year, top_bookmaker_odds_cumulative[id == 3][order(year)]$actualProb, col = 3 , lty = 2, type = "l", ylim = c(0,1))
+legend("topleft",c("Bin Probability Average", "Actual Fraction") ,col = 3 , lty = c(1,2) ,bty = "o", xjust =
+         1,yjust=1,x.intersp = 0.2,y.intersp = 0.7)
+
+```
+
+
+
+
+``` {r secondpart_plot_4, include=TRUE,  eval = TRUE ,echo = FALSE,  message= FALSE}
+
+plot(top_bookmaker_odds_cumulative[id == 4][order(year)]$year, top_bookmaker_odds_cumulative[id == 4][order(year)]$binAverage, col = 4 , lty = 1, type = "l", ylim = c(0,1), xlab = "Actual Fraction", ylab = "Bin Probability Average", main = "bin [0.5,0.55)" )
+lines(top_bookmaker_odds_cumulative[id == 4][order(year)]$year, top_bookmaker_odds_cumulative[id == 4][order(year)]$actualProb, col = 4 , lty = 2, type = "l", ylim = c(0,1))
+legend("topleft",c("Bin Probability Average", "Actual Fraction") ,col = 4 , lty = c(1,2) ,bty = "o", xjust =
+         1,yjust=1,x.intersp = 0.2,y.intersp = 0.7)
+
+```
+
+
+``` {r secondpart_plot_5, include=TRUE,  eval = TRUE ,echo = FALSE,  message= FALSE}
+
+plot(top_bookmaker_odds_cumulative[id == 5][order(year)]$year, top_bookmaker_odds_cumulative[id == 5][order(year)]$binAverage, col = 5 , lty = 1, type = "l", ylim = c(0,1), xlab = "Actual Fraction", ylab = "Bin Probability Average", main = "bin [0.55,0.6)" )
+lines(top_bookmaker_odds_cumulative[id == 5][order(year)]$year, top_bookmaker_odds_cumulative[id == 5][order(year)]$actualProb, col = 5 , lty = 2, type = "l", ylim = c(0,1))
+legend("topleft",c("Bin Probability Average", "Actual Fraction") ,col = 5 , lty = c(1,2) ,bty = "o", xjust =
+         1,yjust=1,x.intersp = 0.2,y.intersp = 0.7)
+
+```
+
+
+``` {r secondpart_plot_6, include=TRUE,  eval = TRUE ,echo = FALSE,  message= FALSE}
+
+plot(top_bookmaker_odds_cumulative[id == 6][order(year)]$year, top_bookmaker_odds_cumulative[id == 6][order(year)]$binAverage, col = 6 , lty = 1, type = "l", ylim = c(0,1), xlab = "Actual Fraction", ylab = "Bin Probability Average", main = "bin [0.6,0.65)" )
+lines(top_bookmaker_odds_cumulative[id == 6][order(year)]$year, top_bookmaker_odds_cumulative[id == 6][order(year)]$actualProb, col = 6 , lty = 2, type = "l", ylim = c(0,1))
+legend("topleft",c("Bin Probability Average", "Actual Fraction") ,col = 6 , lty = c(1,2) ,bty = "o", xjust =
+         1,yjust=1,x.intersp = 0.2,y.intersp = 0.7)
+
+```
+
+
+``` {r secondpart_plot_7, include=TRUE,  eval = TRUE ,echo = FALSE,  message= FALSE}
+
+plot(top_bookmaker_odds_cumulative[id == 7][order(year)]$year, top_bookmaker_odds_cumulative[id == 7][order(year)]$binAverage, col = 7 , lty = 1, type = "l", ylim = c(0,1), xlab = "Actual Fraction", ylab = "Bin Probability Average", main = "bin [0.65,0.7)" )
+lines(top_bookmaker_odds_cumulative[id == 7][order(year)]$year, top_bookmaker_odds_cumulative[id == 7][order(year)]$actualProb, col = 7 , lty = 2, type = "l", ylim = c(0,1))
+legend("topleft",c("Bin Probability Average", "Actual Fraction") ,col = 7 , lty = c(1,2) ,bty = "o", xjust =
+         1,yjust=1,x.intersp = 0.2,y.intersp = 0.7)
+
+```
+
+
+``` {r secondpart_plot_8, include=TRUE,  eval = TRUE ,echo = FALSE,  message= FALSE}
+
+plot(top_bookmaker_odds_cumulative[id == 8][order(year)]$year, top_bookmaker_odds_cumulative[id == 8][order(year)]$binAverage, col = 8 , lty = 1, type = "l", ylim = c(0,1), xlab = "Actual Fraction", ylab = "Bin Probability Average", main = "bin [0.75,0.8)" )
+lines(top_bookmaker_odds_cumulative[id == 8][order(year)]$year, top_bookmaker_odds_cumulative[id == 8][order(year)]$actualProb, col = 8 , lty = 2, type = "l", ylim = c(0,1))
+legend("topleft",c("Bin Probability Average", "Actual Fraction") ,col = 8 , lty = c(1,2) ,bty = "o", xjust =
+         1,yjust=1,x.intersp = 0.2,y.intersp = 0.7)
+
+```
+
+
+For some bins, like bin [0.65,0.7) , the performance gets better as the years passed. However, we cannot say that this holds for all bins. For example bin [0.5,0.55) has worse performance on recent years. 
+In general, the results are consistent with what we observed on part a as expected. As the fraction moves away from 0.5, accurracy deteriorates here as well. The bookmaker's variance from actual fraction stays at a certain level, this might explain its overall success. 
+
+
+
+
+
+
+
+
+
+
+
