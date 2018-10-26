@@ -1,4 +1,4 @@
-# Progress Journal
+﻿# Progress Journal
 
 ## Week 0
 
@@ -26,4 +26,9 @@ use of available information from different sources (odds from different betting
 and etc.).
 
 [Here](HW1rmd.html) is the result report for the first part of this project 
+
+
+##Week 6
+
+[Here](HW3.html) is the result report for the third homework
 
