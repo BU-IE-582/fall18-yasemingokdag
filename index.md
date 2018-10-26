@@ -28,7 +28,7 @@ and etc.).
 [Here](HW1rmd.html) is the result report for the first part of this project 
 
 
-##Week 6
+## Week 6
 
 [Here](HW3.html) is the result report for the third homework
 
