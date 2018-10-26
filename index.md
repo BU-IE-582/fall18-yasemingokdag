@@ -30,5 +30,5 @@ and etc.).
 
 ## Week 6
 
-[Here](HW3.html) is the result report for the third homework
+[Here](HW3.html) is the result report for the second homework
 
