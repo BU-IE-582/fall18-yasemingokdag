@@ -1,0 +1,429 @@
+---
+title: "Bonus_HW"
+author: "Yasemin Gokdag"
+date: "December 28, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE, eval = TRUE}
+require(data.table)
+require(stats)
+require(permute)
+require(kmed)
+require(MASS)
+require(randomForest)
+require(ramify)
+
+covariance_v <- data.table()
+mean_v <- data.table()
+data <- data.table()
+```
+
+##Data generate 
+
+First we generate data as described. There was a problem regarding positive definiteness of covariance matrix. Therefore, I added an additional process.
+Detailed code can be found in *Appendix*
+
+```{r generate_data, include=FALSE, eval=TRUE}
+
+for (i in 1:4) 
+{
+  
+  mean_data <- runif(8, min=1, max=100)
+  
+  #equate upper and lower triangular data in covariance matrix since it should be symmetric
+  cov_data <- randi(10,8,8)
+  cov_data <- cov_data*t(cov_data)
+  
+  #Trying a cholesky decomposition on this matrix fail
+  cholStatus <- try(u <- chol(cov_data), silent = FALSE)
+  cholError <- ifelse(class(cholStatus) == "try-error", TRUE, FALSE)
+  
+  #Covariance matrix is not positive definite. In order to resolve this, I apply the process below :
+  newMat <- cov_data
+  iter <- 0
+  
+  while (cholError) {
+    
+    iter <- iter + 1
+    cat("iteration ", iter, "\n")
+    
+    # replace -ve eigen values with small +ve number
+    newEig <- eigen(newMat)
+    newEig2 <- ifelse(newEig$values < 0, 0, newEig$values)
+    
+    # create modified matrix eqn 5 from Brissette et al 2007, inv = transp for
+    # eig vectors
+    newMat <- newEig$vectors %*% diag(newEig2) %*% t(newEig$vectors)
+    
+    # normalize modified matrix eqn 6 from Brissette et al 2007
+    newMat <- newMat/sqrt(diag(newMat) %*% t(diag(newMat)))
+    
+    # try chol again
+    cholStatus <- try(u <- chol(newMat), silent = TRUE)
+    cholError <- ifelse(class(cholStatus) == "try-error", TRUE, FALSE)
+  }
+  
+  cov_data <- newMat
+  #End of positive deifinite check block
+  
+  #Combine generated mean and covariance values on a single data table. 
+  mean_v <- rbind(mean_data,mean_v)
+  covariance_v <- rbind(cov_data,covariance_v)
+  
+  #Generate data of 500 instances
+  data_temp <- as.data.table(mvrnorm(n=500, mu=c(mean_data),Sigma=cov_data))
+  
+  data <- rbind(data,data_temp)
+}
+
+```
+
+###Q2
+
+Train random forest to find similarity : 
+
+```{r rand_train_1 , include=TRUE, eval= TRUE, results=FALSE}
+#Apply random forest
+rand_forest <- randomForest(x=data, keep.forest=TRUE, proximity=TRUE)
+```
+
+###Q3
+
+Transform similarity to dissimilarity, and apply clustering methods as follows: 
+
+```{r clusters_1 , include=TRUE, eval=TRUE, results= FALSE}
+
+#calculate similarity and transform to dissimilarity
+similarity <- rand_forest$proximity
+dissimilarity <- sqrt(1-similarity )
+
+#Partition around medoids
+medoid <- fastkmed(dissimilarity, ncluster = 4, iterate = 100)
+medoid <- medoid$cluster
+medoid <- as.data.table(medoid)
+
+#k-means
+kmeans_cluster <- kmeans(data, centers=4)
+kmeans_cluster <- kmeans_cluster$cluster
+kmeans_cluster <- as.data.table(kmeans_cluster)
+
+#Hierarchical (Ward's method)
+
+hier <- hclust(as.dist(dissimilarity),method="ward.D2")
+hier <- cutree(hier, k = 4)
+hier <- as.data.table(hier)
+```
+
+###Q4
+
+Sample mean vector and sample covariance matrix for each cluster from three clustering strategies is as follows. Details of the code can be found on *Appendix*
+
+Below is the covariance of each clustering method (medoid, k-means, hierarchical) and clusters 1,2,3,4 respectively. 
+
+```{r cluster_summary_1_shown_cov , include= TRUE, eval = TRUE, echo= FALSE ,results= TRUE }
+data_w_medoid <-  cbind(data, medoid)
+
+cov(data_w_medoid[medoid==1])
+cov(data_w_medoid[medoid==2])
+cov(data_w_medoid[medoid==3])
+cov(data_w_medoid[medoid==4])
+
+data_w_kmeans <- cbind(data,kmeans_cluster)
+
+cov(data_w_kmeans[kmeans_cluster==1])
+cov(data_w_kmeans[kmeans_cluster==2])
+cov(data_w_kmeans[kmeans_cluster==3])
+cov(data_w_kmeans[kmeans_cluster==4])
+
+data_w_hier <- cbind(data,hier)
+
+cov(data_w_hier[hier==1])
+cov(data_w_hier[hier==2])
+cov(data_w_hier[hier==3])
+cov(data_w_hier[hier==4])
+```
+
+
+Below is the mean of each clustering method (medoid, k-means, hierarchical) and clusters 1,2,3,4 respectively. 
+
+```{r cluster_summary_1_shown_mean, include= TRUE, eval= TRUE, echo= FALSE, results= TRUE }
+data_w_medoid [,list(Mean1=mean(V1),
+                    Mean2=mean(V2),
+                    Mean3=mean(V3),
+                    Mean4=mean(V4),
+                    Mean5=mean(V5),
+                    Mean6=mean(V5),
+                    Mean7=mean(V5),
+                    Mean8=mean(V8) ),medoid]
+
+data_w_kmeans[,list(Mean1=mean(V1),
+                 Mean2=mean(V2),
+                 Mean3=mean(V3),
+                 Mean4=mean(V4),
+                 Mean5=mean(V5),
+                 Mean6=mean(V5),
+                 Mean7=mean(V5),
+                 Mean8=mean(V8) ),kmeans_cluster]
+
+data_w_hier[,list(Mean1=mean(V1),
+                   Mean2=mean(V2),
+                   Mean3=mean(V3),
+                   Mean4=mean(V4),
+                   Mean5=mean(V5),
+                   Mean6=mean(V5),
+                   Mean7=mean(V5),
+                   Mean8=mean(V8) ),hier]
+```
+
+
+Comparing to what we have used to generate the data, we see difference in covariance measure for the methods that use similarity matrix. But values are very similar to the proximity output of the random forest 
+
+###Q5 
+
+I added 4 noise variables, and applied the same processes with the new data set. Results are (covariance and mean summaries) as follows. Details of the code can be found in *Appendix*
+
+```{r noisy , include= TRUE, eval= TRUE, echo= FALSE, results= TRUE}
+#Add noise to data 
+
+data2 <- data [,noise_1:=rbinom(1,1,0.5)]
+data2 <- data2[,noise_2:=rbinom(1,1,0.5)]
+data2 <- data2[,noise_3:=rbinom(1,1,0.5)]
+data2 <- data2[,noise_4:=rbinom(1,1,0.5)]
+
+rand_forest_noised <- randomForest(x=data2, keep.forest=TRUE, proximity=TRUE)
+similarity_noised <- rand_forest_noised$proximity
+dissimilarity_noised <- sqrt(1-similarity_noised )
+
+#Medoid 
+medoid_noised=fastkmed(dissimilarity_noised, ncluster = 4, iterate = 100)
+medoid_noised=medoid_noised$cluster
+medoid_noised=as.data.table(medoid_noised)
+medoid_noised_summary <- medoid_noised[,.N,medoid_noised]
+
+#K-means 
+kmeans_cluster_noised <- kmeans(data2, centers=4)
+kmeans_cluster_noised <- kmeans_cluster_noised$cluster
+kmeans_cluster_noised <- as.data.table(kmeans_cluster_noised)
+kmeans_cluster_noised_summary <- kmeans_cluster_noised[,.N,kmeans_cluster_noised]
+
+#Hierarchical
+hier_noised <- hclust(as.dist(dissimilarity_noised),method="ward.D2")
+hier_noised=cutree(hier_noised, k = 4)
+hier_noised=as.data.table(hier_noised)
+hier_noised_summary <- hier_noised[,.N,hier_noised]
+
+data_w_medoid_noised <-  cbind(data2, medoid_noised)
+
+cov(data_w_medoid_noised[medoid_noised==1])
+cov(data_w_medoid_noised[medoid_noised==2])
+cov(data_w_medoid_noised[medoid_noised==3])
+cov(data_w_medoid_noised[medoid_noised==4])
+
+data_w_kmeans_noised <- cbind(data2,kmeans_cluster_noised)
+
+cov(data_w_kmeans_noised[kmeans_cluster_noised==1])
+cov(data_w_kmeans_noised[kmeans_cluster_noised==2])
+cov(data_w_kmeans_noised[kmeans_cluster_noised==3])
+cov(data_w_kmeans_noised[kmeans_cluster_noised==4])
+
+
+data_w_hier_noised <- cbind(data2,hier_noised)
+
+cov(data_w_hier_noised[hier_noised==1])
+cov(data_w_hier_noised[hier_noised==2])
+cov(data_w_hier_noised[hier_noised==3])
+cov(data_w_hier_noised[hier_noised==4])
+
+
+data_w_medoid_noised [,list(Mean1=mean(V1),
+                     Mean2=mean(V2),
+                     Mean3=mean(V3),
+                     Mean4=mean(V4),
+                     Mean5=mean(V5),
+                     Mean6=mean(V5),
+                     Mean7=mean(V5),
+                     Mean8=mean(V8) ),medoid_noised]
+
+data_w_kmeans_noised[,list(Mean1=mean(V1),
+                    Mean2=mean(V2),
+                    Mean3=mean(V3),
+                    Mean4=mean(V4),
+                    Mean5=mean(V5),
+                    Mean6=mean(V5),
+                    Mean7=mean(V5),
+                    Mean8=mean(V8) ),kmeans_cluster_noised]
+
+data_w_hier_noised[,list(Mean1=mean(V1),
+                  Mean2=mean(V2),
+                  Mean3=mean(V3),
+                  Mean4=mean(V4),
+                  Mean5=mean(V5),
+                  Mean6=mean(V5),
+                  Mean7=mean(V5),
+                  Mean8=mean(V8) ),hier_noised]
+
+```
+
+
+As we see from the results, in the beginning all clustering approaches behaved similarly expect medoid method. We see that 1 cluster especially has poor performance, other clusters performs better. Probably because most of the data points are in 1st cluster 
+
+```{r medoid_summary , include= TRUE, eval = TRUE, echo = FALSE ,results= TRUE }
+medoid[,.N,medoid]
+```
+
+Results worsens in terms of covariance when we add noisy data, but mean values are not affected. 
+
+Generally speaking, hierarchical clustering seems to perform best in this case. 
+
+##Appendix
+
+Generate data : 
+
+```{r ref.label = 'generate_data', include=TRUE, eval=FALSE }
+
+```
+
+Cluster covariance and mean analysis: 
+
+```{r cluster_summary_1 , include= TRUE, eval=FALSE}
+
+data_w_medoid <-  cbind(data, medoid)
+
+cov(data_w_medoid[medoid==1])
+cov(data_w_medoid[medoid==2])
+cov(data_w_medoid[medoid==3])
+cov(data_w_medoid[medoid==4])
+
+data_w_kmeans <- cbind(data,kmeans_cluster)
+
+cov(data_w_kmeans[kmeans_cluster==1])
+cov(data_w_kmeans[kmeans_cluster==2])
+cov(data_w_kmeans[kmeans_cluster==3])
+cov(data_w_kmeans[kmeans_cluster==4])
+
+
+data_w_hier <- cbind(data,hier)
+
+cov(data_w_hier[hier==1])
+cov(data_w_hier[hier==2])
+cov(data_w_hier[hier==3])
+cov(data_w_hier[hier==4])
+
+
+data_w_medoid [,list(Mean1=mean(V1),
+                    Mean2=mean(V2),
+                    Mean3=mean(V3),
+                    Mean4=mean(V4),
+                    Mean5=mean(V5),
+                    Mean6=mean(V5),
+                    Mean7=mean(V5),
+                    Mean8=mean(V8) ),medoid]
+
+data_w_kmeans[,list(Mean1=mean(V1),
+                 Mean2=mean(V2),
+                 Mean3=mean(V3),
+                 Mean4=mean(V4),
+                 Mean5=mean(V5),
+                 Mean6=mean(V5),
+                 Mean7=mean(V5),
+                 Mean8=mean(V8) ),kmeans_cluster]
+
+data_w_hier[,list(Mean1=mean(V1),
+                   Mean2=mean(V2),
+                   Mean3=mean(V3),
+                   Mean4=mean(V4),
+                   Mean5=mean(V5),
+                   Mean6=mean(V5),
+                   Mean7=mean(V5),
+                   Mean8=mean(V8) ),hier]
+
+```
+
+Noisy data generation & clustering : 
+
+```{r noisy_appendix, include=TRUE, eval=FALSE }
+#Add noise to data 
+
+data2 <- data [,noise_1:=rbinom(1,1,0.5)]
+data2 <- data2[,noise_2:=rbinom(1,1,0.5)]
+data2 <- data2[,noise_3:=rbinom(1,1,0.5)]
+data2 <- data2[,noise_4:=rbinom(1,1,0.5)]
+
+rand_forest_noised <- randomForest(x=data2, keep.forest=TRUE, proximity=TRUE)
+similarity_noised <- rand_forest_noised$proximity
+dissimilarity_noised <- sqrt(1-similarity_noised )
+
+#Medoid 
+medoid_noised=fastkmed(dissimilarity_noised, ncluster = 4, iterate = 100)
+medoid_noised=medoid_noised$cluster
+medoid_noised=as.data.table(medoid_noised)
+medoid_noised_summary <- medoid_noised[,.N,medoid_noised]
+
+#K-means 
+kmeans_cluster_noised <- kmeans(data2, centers=4)
+kmeans_cluster_noised <- kmeans_cluster_noised$cluster
+kmeans_cluster_noised <- as.data.table(kmeans_cluster_noised)
+kmeans_cluster_noised_summary <- kmeans_cluster_noised[,.N,kmeans_cluster_noised]
+
+#Hierarchical
+hier_noised <- hclust(as.dist(dissimilarity_noised),method="ward.D2")
+hier_noised=cutree(hier_noised, k = 4)
+hier_noised=as.data.table(hier_noised)
+hier_noised_summary <- hier_noised[,.N,hier_noised]
+
+data_w_medoid_noised <-  cbind(data2, medoid_noised)
+
+cov(data_w_medoid_noised[medoid_noised==1])
+cov(data_w_medoid_noised[medoid_noised==2])
+cov(data_w_medoid_noised[medoid_noised==3])
+cov(data_w_medoid_noised[medoid_noised==4])
+
+data_w_kmeans_noised <- cbind(data2,kmeans_cluster_noised)
+
+cov(data_w_kmeans_noised[kmeans_cluster_noised==1])
+cov(data_w_kmeans_noised[kmeans_cluster_noised==2])
+cov(data_w_kmeans_noised[kmeans_cluster_noised==3])
+cov(data_w_kmeans_noised[kmeans_cluster_noised==4])
+
+
+data_w_hier_noised <- cbind(data2,hier_noised)
+
+cov(data_w_hier_noised[hier_noised==1])
+cov(data_w_hier_noised[hier_noised==2])
+cov(data_w_hier_noised[hier_noised==3])
+cov(data_w_hier_noised[hier_noised==4])
+
+
+data_w_medoid_noised [,list(Mean1=mean(V1),
+                     Mean2=mean(V2),
+                     Mean3=mean(V3),
+                     Mean4=mean(V4),
+                     Mean5=mean(V5),
+                     Mean6=mean(V5),
+                     Mean7=mean(V5),
+                     Mean8=mean(V8) ),medoid_noised]
+
+data_w_kmeans_noised[,list(Mean1=mean(V1),
+                    Mean2=mean(V2),
+                    Mean3=mean(V3),
+                    Mean4=mean(V4),
+                    Mean5=mean(V5),
+                    Mean6=mean(V5),
+                    Mean7=mean(V5),
+                    Mean8=mean(V8) ),kmeans_cluster_noised]
+
+data_w_hier_noised[,list(Mean1=mean(V1),
+                  Mean2=mean(V2),
+                  Mean3=mean(V3),
+                  Mean4=mean(V4),
+                  Mean5=mean(V5),
+                  Mean6=mean(V5),
+                  Mean7=mean(V5),
+                  Mean8=mean(V8) ),hier_noised]
+
+```
+
+
+
+
