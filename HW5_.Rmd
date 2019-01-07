@@ -1,0 +1,800 @@
+---
+title: "HW5"
+author: "Yasemin Gokdag"
+date: "January 7, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE, eval = TRUE}
+rm(list = ls());
+require(data.table)
+require(kmed)
+require(Rfast)
+require(ROSE)
+
+setwd('C:/Program Files/R/R-3.5.0/library/lqa/R')
+source('cv.lqa.r')
+source('lqa.control.r')
+source('fused.lasso.r')
+source('lambda.check.r')
+source('lqa.default.r')
+source('lqa.update2.r')
+source('get.Amat.r')
+source('predict.lqa.r')
+source('aic.loss.r')
+source('squared.loss.r')
+source('dev.loss.r')
+source('lasso.r')
+
+musk1 <- read.table(file = "C:/Users/yasemin/Downloads/Musk1.csv", header = F, sep = ",")
+musk1 <- as.data.table(musk1)
+
+setnames(musk1,"V1","BagClass")
+setnames(musk1,"V2","BagId")
+
+euclidean_dist <- dist(musk1,method = "euclidean")
+manhattan_dist <- dist(musk1,method = "manhattan")
+
+
+```
+
+## HW5 
+
+First we read the data and assign names of the first two columns BagClass and BagIs respectively, 
+As distance metic I used euclidean and manhattan distances 
+
+First method to be applied is k-medoids with euclidean distance. Details of the code can be found in *Appendix*
+
+ROC curve for k-medoids with euclidean distance is as follows. To assess the performance of the clusters I used a purity measure that would show in which ratio the instances that belong to same bag are clustered the same. This is may not a very good measure, but gives an idea. 
+
+```{r kmedoid_euc , include= TRUE, eval = TRUE, echo = FALSE, message= FALSE , results = TRUE }
+
+#Partition around medoids
+
+plot.new()
+
+k_med_euc <- data.table()
+bag_data_euc <- data.table()
+k_legend <- data.table()
+k_color <- data.table()
+auc_euc_medoid <- data.table()
+lambda_euc_medoid <- data.table()
+purity_euc_med_2 <- data.table()
+
+for (k in c(3,4,5)){
+  
+  medoid_euc <- fastkmed(euclidean_dist, ncluster = k, iterate = 100)
+  medoid_euc_cluster <- as.data.table(medoid_euc$cluster)
+  setnames(medoid_euc_cluster, "V1","cluster")
+  
+  euclidean_dist <- as.matrix(euclidean_dist)
+  cluster_dist <- as.data.table(euclidean_dist[,medoid_euc$medoid])
+  
+  data <- copy(musk1) 
+  data <- cbind(musk1[,1:2],cluster_dist)
+  euc_medoid_bagdata <- data[, lapply(.SD, mean), by=list(BagClass,BagId)]
+  
+  purity <- cbind(musk1[,1:2],medoid_euc_cluster)
+  
+  purity_matrix <- as.data.table(dcast(purity, BagId ~ cluster, fun  = length ))
+  purity_sum <- dcast(purity, BagId ~ . , fun  = length )
+  p <- purity_matrix[,2:ncol(purity_matrix)] / purity_sum$.
+  purity_euc_med <- sum(apply(p,1,max))/nrow(p)
+  
+  purity_euc_med_2 <- rbind(purity_euc_med_2, paste0('Purity metric for k = ' , k , ' is ', purity_euc_med) )
+  
+  k_med_euc <- rbind(k_med_euc ,data.table(Cluster = k,Distance='euclidean', Purity =purity_euc_med))
+  #print(paste0('k-medoids for k ', k , ' completed'))
+  
+  bag_data_euc <- rbind(bag_data_euc, data.table(Cluster = k,Distance='euclidean',euc_medoid_bagdata), fill = TRUE)
+  #print(paste0('bag data for k ', k , ' printed'))
+  
+  #generating arbitrary lambda2 sequences
+  lambda2=exp (seq (-7, 1, length = 20))
+#  print(lambda2) #check what they are
+  #parameters to be tried is lambda1 for L1 penalty and lambda2 for L2 (fused lasso penalty)
+  #fixing lambda1 to 1, I try to find the optimal lambda2 value from the sequence
+  lambdas=list(1,lambda2)
+  
+  #run the logistic regression (binomial family for binary classification problem)
+  cvFused=cv.lqa(euc_medoid_bagdata$BagClass,euc_medoid_bagdata[,3:ncol(euc_medoid_bagdata)],lambda.candidates = lambdas, intercept = FALSE,
+                 family=binomial(), penalty.family=fused.lasso,n.fold=10,loss.func = "dev.loss")
+  
+  #predictions 
+  cvFused$best.obj$fitted.values
+  k_legend <- rbind(k_legend,k)
+  k_color <- rbind(k_color,k)
+  
+  
+  if (k == 3){
+    roc.curve(euc_medoid_bagdata$BagClass, cvFused$best.obj$fitted.values, add.roc = FALSE , col = k, main = 'k-medoids with Euclidean Distance', cex.main = 0.6, cex.axis = 0.6  )
+      legend("bottomright",  legend = unique(k_legend$x), col = unique(k_color$x), lty = 1  , title = "Cluster for k = ",  xjust =1 , yjust=1, x.intersp = 0.2,y.intersp = 0.6, cex = 0.6)
+      auc_euc_medoid <- rbind(auc_euc_medoid,paste0('AUC for k = ',k,' is ', auc(euc_medoid_bagdata$BagClass, cvFused$best.obj$fitted.values)))
+      
+  } else 
+  {
+    roc.curve(euc_medoid_bagdata$BagClass, cvFused$best.obj$fitted.values, add.roc = TRUE , col = k , main = 'k-medoids with Euclidean Distance', cex.main = 0.6, cex.axis = 0.6  )
+      legend("bottomright",  legend = unique(k_legend$x), col = unique(k_color$x), lty = 1  , title = "Cluster for k = ",  xjust =1 , yjust=1, x.intersp = 0.2,y.intersp = 0.6, cex = 0.6)
+      auc_euc_medoid <- rbind(auc_euc_medoid,paste0('AUC for k = ',k,' is ', auc(euc_medoid_bagdata$BagClass, cvFused$best.obj$fitted.values)))
+      
+      }
+  lambda_euc_medoid <- rbind(lambda_euc_medoid,paste0('Lambda2 value for k = ',k,' is ',cvFused$lambda.opt[2]))
+  
+}
+
+```
+
+Purity performance of each cluster for k's are as follows  :
+
+```{r purity_euc_medoid , include= TRUE, eval = TRUE , echo = FALSE}
+purity_euc_med_2
+```
+
+Selected lambda values for fused lasso after 10-fold cross validation and AUC performance for each k is as follows : 
+
+Lambda2 Values : 
+
+```{r lambda_euc_medoid , include= TRUE, eval = TRUE , echo = FALSE}
+lambda_euc_medoid
+```
+
+AUC values : 
+
+```{r performance_euc_medoid , include= TRUE, eval = TRUE , echo = FALSE}
+auc_euc_medoid
+```
+
+
+Same results will be provided for each methodology. Detailed codes can be found in *Appendix* for each 
+
+ROC curve for k-medoids with Manhattan distance 
+
+```{r manhattan_medoid_ROC , include= TRUE, eval = TRUE, echo = FALSE, results= TRUE, message= FALSE }
+
+plot.new()
+#Manhattan distance 
+k_legend <- data.table()
+k_color <- data.table()
+auc_man_medoid <- data.table()
+lambda_man_medoid <- data.table()
+k_med_man <- data.table()
+bag_data_man <- data.table()
+purity_man_med_2 <- data.table()
+
+for (k in c(3,4,5)){
+  
+  medoid_man <- fastkmed(manhattan_dist, ncluster = k, iterate = 100)
+  medoid_man_cluster <- as.data.table(medoid_man$cluster)
+  setnames(medoid_man_cluster, "V1","cluster")
+  
+  manhattan_dist <- as.matrix(manhattan_dist)
+  cluster_dist <- as.data.table(manhattan_dist[,medoid_man$medoid])
+  
+  data <- copy(musk1) 
+  data <- cbind(musk1[,1:2],cluster_dist)
+  man_medoid_bagdata <- data[, lapply(.SD, mean), by=list(BagClass,BagId)]
+  
+  purity <- cbind(musk1[,1:2],medoid_man_cluster)
+  
+  purity_matrix <- as.data.table(dcast(purity, BagId ~ cluster, fun  = length ))
+  purity_sum <- dcast(purity, BagId ~ . , fun  = length )
+  p <- purity_matrix[,2:ncol(purity_matrix)] / purity_sum$.
+  purity_man_med <- sum(apply(p,1,max))/nrow(p)
+  
+  purity_man_med_2 <- rbind(purity_man_med_2, paste0('Purity metric for k = ' , k , ' is ',purity_man_med))
+  
+  #k_med_man <- rbind(k_med_man ,data.table(Cluster = k,Distance='manhattan', Purity =purity_man_med))
+  #print(paste0('k-medoids for k ', k , ' completed'))
+  
+  #bag_data_man <- rbind(bag_data_man, data.table(Cluster = k,Distance='manhattan',man_medoid_bagdata), fill = TRUE)
+  #print(paste0('bag data for k ', k , ' printed'))
+  
+
+  #generating arbitrary lambda2 sequences
+  lambda2=exp (seq (-7, 1, length = 20))
+  #  print(lambda2) #check what they are
+  #parameters to be tried is lambda1 for L1 penalty and lambda2 for L2 (fused lasso penalty)
+  #fixing lambda1 to 1, I try to find the optimal lambda2 value from the sequence
+  lambdas=list(1,lambda2)
+  
+  #run the logistic regression (binomial family for binary classification problem)
+  cvFused=cv.lqa(man_medoid_bagdata$BagClass,man_medoid_bagdata[,3:ncol(man_medoid_bagdata)],lambda.candidates = lambdas, intercept = FALSE,
+                 family=binomial(), penalty.family=fused.lasso,n.fold=10,loss.func = "dev.loss")
+  
+  #predictions 
+  cvFused$best.obj$fitted.values
+  k_legend <- rbind(k_legend,k)
+  k_color <- rbind(k_color,k)
+  
+  if (k == 3){
+    roc.curve(man_medoid_bagdata$BagClass, cvFused$best.obj$fitted.values, add.roc = FALSE , col = k, main = 'k-medoids with Manhattan Distance', cex.main = 0.6, cex.axis = 0.6  )
+    legend("bottomright",  legend = unique(k_legend$x), col = unique(k_color$x), lty = 1  , title = "Cluster for k = ",  xjust =1 , yjust=1, x.intersp = 0.2,y.intersp = 0.6, cex = 0.6)
+    auc_man_medoid <- rbind(auc_man_medoid,paste0('AUC for k = ',k,' is ', auc(man_medoid_bagdata$BagClass, cvFused$best.obj$fitted.values)))
+    
+  } else 
+  {
+    roc.curve(man_medoid_bagdata$BagClass, cvFused$best.obj$fitted.values, add.roc = TRUE , col = k , main = 'k-medoids with Manhattan Distance', cex.main = 0.6, cex.axis = 0.6  )
+    legend("bottomright",  legend = unique(k_legend$x), col = unique(k_color$x), lty = 1  , title = "Cluster for k = ",  xjust =1 , yjust=1, x.intersp = 0.2,y.intersp = 0.6, cex = 0.6)
+    auc_man_medoid <- rbind(auc_man_medoid,paste0('AUC for k = ',k,' is ', auc(man_medoid_bagdata$BagClass, cvFused$best.obj$fitted.values)))
+    
+  }
+  lambda_man_medoid <- rbind(lambda_man_medoid,paste0('Lambda2 value for k = ',k,' is ',cvFused$lambda.opt[2]))
+}
+
+```
+
+Purity performance of each cluster for k's are as follows  :
+
+```{r purity_man_medoid , include= TRUE, eval = TRUE , echo = FALSE}
+purity_man_med_2
+```
+
+Selected lambda values for fused lasso after 10-fold cross validation and AUC performance for each k is as follows : 
+
+Lambda2 Values : 
+
+```{r lambda_man_medoid , include= TRUE, eval = TRUE , echo = FALSE}
+lambda_man_medoid
+```
+
+AUC values : 
+
+```{r performance_man_medoid , include= TRUE, eval = TRUE , echo = FALSE}
+auc_man_medoid
+```
+
+
+ROC for hierarchical clustering with Euclidean distance & ward's method
+
+```{r hier_euc , include= TRUE , eval = TRUE, echo= FALSE , results= TRUE , message= FALSE}
+hier_euc <- data.table()
+bag_data_hier_euc <- data.table()
+plot.new()
+#Manhattan distance 
+k_legend <- data.table()
+k_color <- data.table()
+auc_euc_hier <- data.table()
+lambda_euc_hier <- data.table()
+purity_hier_euc <- data.table()
+
+for (k in (3:5)){
+  hier <- hclust(as.dist(euclidean_dist),method="ward.D2")
+  hier <- cutree(hier, k = k )
+  hier_data <- copy(musk1)
+  #Add clusters to data 
+  hier_data <- cbind(musk1, hier)
+  
+  #Calcualate mean instance for each cluster 
+  hier_data_centroids <- hier_data[,3:ncol(hier_data)][, lapply(.SD,mean), by = hier]
+  hier_dist <- rbind(hier_data_centroids[,2:ncol(hier_data_centroids)], musk1[,3:ncol(musk1)])
+  
+  hier_dist_2 <- dist(hier_dist,method = "euclidean")
+  hier_dist_2 <- as.matrix(hier_dist_2)
+  hier_cluster_dist <- t(hier_dist_2[(nrow(musk1)+1):nrow(hier_dist_2),1:nrow(musk1)])
+  
+  hier_data_2 <- cbind(musk1[,1:2],hier_cluster_dist)
+  hier_bagdata <- hier_data_2[, lapply(.SD, mean), by=list(BagClass,BagId)]
+  
+  class_hier <- hier_bagdata$BagClass
+  #bagdata <- hier_bagdata[,2:ncol(hier_bagdata)]
+  
+  purity <- cbind(musk1[,1:2],hier_data$hier)
+  
+  purity_matrix <- as.data.table(dcast(purity, BagId ~ hier, fun  = length ))
+  purity_sum <- dcast(purity, BagId ~ . , fun  = length )
+  p <- purity_matrix[,2:ncol(purity_matrix)] / purity_sum$.
+  purity_2 <- sum(apply(p,1,max))/nrow(p)
+  
+  purity_hier_euc <- rbind(purity_hier_euc , paste0('Purity metric for k = ' , k , ' is ',purity_2 ))
+  
+  # hier_euc <- rbind(hier_euc ,data.table(Cluster = k,Distance='euclidean', Purity =purity_2))
+  # print(paste0('hierarchical clustering for k ', k , ' completed'))
+  # 
+  # bag_data_hier_euc <- rbind(bag_data_hier_euc, data.table(Cluster = k,Distance='euclidean',bagdata), fill = TRUE)
+  # print(paste0('bag data for k ', k , ' printed'))
+  
+  #generating arbitrary lambda2 sequences
+  lambda2=exp (seq (-7, 1, length = 20))
+  #  print(lambda2) #check what they are
+  #parameters to be tried is lambda1 for L1 penalty and lambda2 for L2 (fused lasso penalty)
+  #fixing lambda1 to 1, I try to find the optimal lambda2 value from the sequence
+  lambdas=list(1,lambda2)
+  
+  #run the logistic regression (binomial family for binary classification problem)
+  cvFused=cv.lqa(hier_bagdata$BagClass,hier_bagdata[,3:ncol(hier_bagdata)],lambda.candidates = lambdas, intercept = FALSE,
+                 family=binomial(), penalty.family=fused.lasso,n.fold=10,loss.func = "dev.loss")
+  
+  k_legend <- rbind(k_legend,k)
+  k_color <- rbind(k_color,k)
+  if (k == 3){
+    roc.curve(hier_bagdata$BagClass, cvFused$best.obj$fitted.values, add.roc = FALSE , col = k, main = 'Hierarchical Clustering with Euclidean Distance', cex.main = 0.6, cex.axis = 0.6  )
+    legend("bottomright",  legend = unique(k_legend$x), col = unique(k_color$x), lty = 1  , title = "Cluster for k = ",  xjust =1 , yjust=1, x.intersp = 0.2,y.intersp = 0.6, cex = 0.6)
+    auc_euc_hier <- rbind(auc_euc_hier,paste0('AUC for k = ',k,' is ', auc(hier_bagdata$BagClass, cvFused$best.obj$fitted.values)))
+    
+  } else 
+  {
+    roc.curve(hier_bagdata$BagClass, cvFused$best.obj$fitted.values, add.roc = TRUE , col = k , main = 'Hierarchical Clustering with Euclidean Distance', cex.main = 0.6, cex.axis = 0.6  )
+    legend("bottomright",  legend = unique(k_legend$x), col = unique(k_color$x), lty = 1  , title = "Cluster for k = ",  xjust =1 , yjust=1, x.intersp = 0.2,y.intersp = 0.6, cex = 0.6)
+    auc_euc_hier <- rbind(auc_euc_hier,paste0('AUC for k = ',k,' is ', auc(hier_bagdata$BagClass, cvFused$best.obj$fitted.values)))
+    
+  }
+  lambda_euc_hier <- rbind(lambda_euc_hier,paste0('Lambda2 value for k = ',k,' is ',cvFused$lambda.opt[2]))
+  
+}
+
+```
+
+
+Purity performance of each cluster for k's are as follows  :
+
+```{r purity_euc_hier , include= TRUE, eval = TRUE , echo = FALSE}
+purity_hier_euc
+```
+
+Selected lambda values for fused lasso after 10-fold cross validation and AUC performance for each k is as follows : 
+
+Lambda2 Values : 
+
+```{r lambda_euc_hier, include= TRUE, eval = TRUE , echo = FALSE}
+lambda_euc_hier
+```
+
+AUC values : 
+
+```{r performance_euc_hier , include= TRUE, eval = TRUE , echo = FALSE}
+auc_euc_hier
+```
+
+
+ROC for hierarchical clustering with Manhattan distance & ward's method
+
+```{r hier_man , include= TRUE , eval = TRUE, echo= FALSE , results= TRUE , message= FALSE}
+#Hierarchical with manhattan distance
+plot.new()
+#Manhattan distance 
+k_legend <- data.table()
+k_color <- data.table()
+auc_man_hier <- data.table()
+lambda_man_hier <- data.table()
+hier_man <- data.table()
+bag_data_hier_man <- data.table()
+purity_hier_man <- data.table()
+
+rm(hier);
+rm(hier_data);
+rm(hier_dist);
+rm(hier_data_2);
+
+
+for (k in (3:5)){
+  hier <- hclust(as.dist(manhattan_dist),method="ward.D2")
+  hier <- cutree(hier, k = k )
+  hier_data <- copy(musk1)
+  #Add clusters to data 
+  hier_data <- cbind(musk1, hier)
+  
+  #Calcualate mean instance for each cluster 
+  hier_data_centroids <- hier_data[,3:ncol(hier_data)][, lapply(.SD,mean), by = hier]
+  hier_dist <- rbind(hier_data_centroids[,2:ncol(hier_data_centroids)], musk1[,3:ncol(musk1)])
+  
+  hier_dist_2 <- dist(hier_dist,method = "manhattan")
+  hier_dist_2 <- as.matrix(hier_dist_2)
+  hier_cluster_dist <- t(hier_dist_2[(nrow(musk1)+1):nrow(hier_dist_2),1:nrow(musk1)])
+  
+  hier_data_2 <- cbind(musk1[,1:2],hier_cluster_dist)
+  bag_data_hier_man <- hier_data_2[, lapply(.SD, mean), by=list(BagClass,BagId)]
+  
+  class_hier <- bag_data_hier_man$BagClass
+  bagdata <- bag_data_hier_man[,2:ncol(bag_data_hier_man)]
+  
+  
+  purity <- cbind(musk1[,1:2],hier_data$hier)
+  
+  purity_matrix <- as.data.table(dcast(purity, BagId ~ hier, fun  = length ))
+  purity_sum <- dcast(purity, BagId ~ . , fun  = length )
+  p <- purity_matrix[,2:ncol(purity_matrix)] / purity_sum$.
+  purity_2 <- sum(apply(p,1,max))/nrow(p)
+  
+  purity_hier_man <- rbind(purity_hier_man, paste0('Purity metric for k = ' , k , ' is ',purity_2 ))
+  
+  
+  #generating arbitrary lambda2 sequences
+  lambda2=exp(seq (-7, 1, length = 20))
+  #  print(lambda2) #check what they are
+  #parameters to be tried is lambda1 for L1 penalty and lambda2 for L2 (fused lasso penalty)
+  #fixing lambda1 to 1, I try to find the optimal lambda2 value from the sequence
+  lambdas=list(1,lambda2)
+  
+  #run the logistic regression (binomial family for binary classification problem)
+  cvFused=cv.lqa(bag_data_hier_man$BagClass,bag_data_hier_man[,3:ncol(bag_data_hier_man)],lambda.candidates = lambdas, intercept = FALSE,
+                 family=binomial(), penalty.family=fused.lasso,n.fold=10,loss.func = "dev.loss")
+  
+  #predictions 
+  cvFused$best.obj$fitted.values
+  k_legend <- rbind(k_legend,k)
+  k_color <- rbind(k_color,k)
+  
+  if (k == 3){
+    roc.curve(bag_data_hier_man$BagClass, cvFused$best.obj$fitted.values, add.roc = FALSE , col = k, main = 'Hierarchical Clustering with Manhattan Distance', cex.main = 0.6, cex.axis = 0.6  )
+    legend("bottomright",  legend = unique(k_legend$x), col = unique(k_color$x), lty = 1  , title = "Cluster for k = ",  xjust =1 , yjust=1, x.intersp = 0.2,y.intersp = 0.6, cex = 0.6)
+    auc_man_hier <- rbind(auc_man_hier,paste0('AUC for k = ',k,' is ', auc(bag_data_hier_man$BagClass, cvFused$best.obj$fitted.values)))
+    
+  } else 
+  {
+    roc.curve(bag_data_hier_man$BagClass, cvFused$best.obj$fitted.values, add.roc = TRUE , col = k , main = 'Hierarchical Clustering with Manhattan Distance', cex.main = 0.6, cex.axis = 0.6  )
+    legend("bottomright",  legend = unique(k_legend$x), col = unique(k_color$x), lty = 1  , title = "Cluster for k = ",  xjust =1 , yjust=1, x.intersp = 0.2,y.intersp = 0.6, cex = 0.6)
+    auc_man_hier <- rbind(auc_man_hier,paste0('AUC for k = ',k,' is ', auc(bag_data_hier_man$BagClass, cvFused$best.obj$fitted.values)))
+    
+  }
+  lambda_man_hier <- rbind(lambda_man_hier,paste0('Lambda2 value for k = ',k,' is ',cvFused$lambda.opt[2]))
+  
+}
+
+
+```
+
+Purity performance of each cluster for k's are as follows  :
+
+```{r purity_man_hier , include= TRUE, eval = TRUE , echo = FALSE}
+purity_hier_man
+```
+
+Selected lambda values for fused lasso after 10-fold cross validation and AUC performance for each k is as follows : 
+
+Lambda2 Values : 
+
+```{r lambda_man_hier, include= TRUE, eval = TRUE , echo = FALSE}
+lambda_man_hier
+```
+
+AUC values : 
+
+```{r performance_man_hier , include= TRUE, eval = TRUE , echo = FALSE}
+auc_man_hier
+```
+
+
+AUC values are closer to 1 for k-medoids clustering with Euclidean distance, this implies that we have a better distinction between two classes. We can also observe that quality of distinction increases as k value increase. This implies that purity measure we create is not a good indicatior of class performance. 
+
+In short we can say that best performance achieved by k-medoids clustering with euclidean distance and k = 5 clusters. 
+
+
+## Appendix 
+
+Initialization 
+
+```{r initialize , include= TRUE, eval= FALSE, echo = TRUE}
+rm(list = ls());
+require(data.table)
+require(kmed)
+require(Rfast)
+require(ROSE)
+
+setwd('C:/Program Files/R/R-3.5.0/library/lqa/R')
+source('cv.lqa.r')
+source('lqa.control.r')
+source('fused.lasso.r')
+source('lambda.check.r')
+source('lqa.default.r')
+source('lqa.update2.r')
+source('get.Amat.r')
+source('predict.lqa.r')
+source('aic.loss.r')
+source('squared.loss.r')
+source('dev.loss.r')
+source('lasso.r')
+
+musk1 <- read.table(file = "C:/Users/yasemin/Downloads/Musk1.csv", header = F, sep = ",")
+musk1 <- as.data.table(musk1)
+
+setnames(musk1,"V1","BagClass")
+setnames(musk1,"V2","BagId")
+
+euclidean_dist <- dist(musk1,method = "euclidean")
+manhattan_dist <- dist(musk1,method = "manhattan")
+
+```
+
+
+K-medoids with euclidean distance 
+```{r k_medoid_euc_appendix , include= TRUE, eval= FALSE, echo = TRUE} 
+#Partition around medoids
+
+plot.new()
+
+k_med_euc <- data.table()
+bag_data_euc <- data.table()
+k_legend <- data.table()
+k_color <- data.table()
+auc_euc_medoid <- data.table()
+lambda_euc_medoid <- data.table()
+purity_euc_med_2 <- data.table()
+
+for (k in c(3,4,5)){
+  
+  medoid_euc <- fastkmed(euclidean_dist, ncluster = k, iterate = 100)
+  medoid_euc_cluster <- as.data.table(medoid_euc$cluster)
+  setnames(medoid_euc_cluster, "V1","cluster")
+  
+  euclidean_dist <- as.matrix(euclidean_dist)
+  cluster_dist <- as.data.table(euclidean_dist[,medoid_euc$medoid])
+  
+  data <- copy(musk1) 
+  data <- cbind(musk1[,1:2],cluster_dist)
+  euc_medoid_bagdata <- data[, lapply(.SD, mean), by=list(BagClass,BagId)]
+  
+  purity <- cbind(musk1[,1:2],medoid_euc_cluster)
+  
+  purity_matrix <- as.data.table(dcast(purity, BagId ~ cluster, fun  = length ))
+  purity_sum <- dcast(purity, BagId ~ . , fun  = length )
+  p <- purity_matrix[,2:ncol(purity_matrix)] / purity_sum$.
+  purity_euc_med <- sum(apply(p,1,max))/nrow(p)
+  
+  purity_euc_med_2 <- rbind(purity_euc_med_2, paste0('Purity metric for k = ' , k , ' is ', purity_euc_med) )
+  
+
+  #generating arbitrary lambda2 sequences
+  lambda2=exp (seq (-7, 1, length = 20))
+#  print(lambda2) #check what they are
+  #parameters to be tried is lambda1 for L1 penalty and lambda2 for L2 (fused lasso penalty)
+  #fixing lambda1 to 1, I try to find the optimal lambda2 value from the sequence
+  lambdas=list(1,lambda2)
+  
+  #run the logistic regression (binomial family for binary classification problem)
+  cvFused=cv.lqa(euc_medoid_bagdata$BagClass,euc_medoid_bagdata[,3:ncol(euc_medoid_bagdata)],lambda.candidates = lambdas, intercept = FALSE,
+                 family=binomial(), penalty.family=fused.lasso,n.fold=10,loss.func = "dev.loss")
+  
+  #predictions 
+  cvFused$best.obj$fitted.values
+  k_legend <- rbind(k_legend,k)
+  k_color <- rbind(k_color,k)
+  
+  
+  if (k == 3){
+    roc.curve(euc_medoid_bagdata$BagClass, cvFused$best.obj$fitted.values, add.roc = FALSE , col = k, main = 'k-medoids with Euclidean Distance', cex.main = 0.6, cex.axis = 0.6  )
+      legend("bottomright",  legend = unique(k_legend$x), col = unique(k_color$x), lty = 1  , title = "Cluster for k = ",  xjust =1 , yjust=1, x.intersp = 0.2,y.intersp = 0.6, cex = 0.6)
+      auc_euc_medoid <- rbind(auc_euc_medoid,paste0('AUC for k = ',k,' is ', auc(euc_medoid_bagdata$BagClass, cvFused$best.obj$fitted.values)))
+      
+  } else 
+  {
+    roc.curve(euc_medoid_bagdata$BagClass, cvFused$best.obj$fitted.values, add.roc = TRUE , col = k , main = 'k-medoids with Euclidean Distance', cex.main = 0.6, cex.axis = 0.6  )
+      legend("bottomright",  legend = unique(k_legend$x), col = unique(k_color$x), lty = 1  , title = "Cluster for k = ",  xjust =1 , yjust=1, x.intersp = 0.2,y.intersp = 0.6, cex = 0.6)
+      auc_euc_medoid <- rbind(auc_euc_medoid,paste0('AUC for k = ',k,' is ', auc(euc_medoid_bagdata$BagClass, cvFused$best.obj$fitted.values)))
+      
+      }
+  lambda_euc_medoid <- rbind(lambda_euc_medoid,paste0('Lambda2 value for k = ',k,' is ',cvFused$lambda.opt[2]))
+  
+}
+
+```
+
+K-medoids with manhattan distance 
+```{r manhattan_medoid_ROC_app, include= TRUE, eval= FALSE, echo= TRUE}
+
+plot.new()
+#Manhattan distance 
+k_legend <- data.table()
+k_color <- data.table()
+auc_man_medoid <- data.table()
+lambda_man_medoid <- data.table()
+k_med_man <- data.table()
+bag_data_man <- data.table()
+purity_man_med_2 <- data.table()
+
+for (k in c(3,4,5)){
+  
+  medoid_man <- fastkmed(manhattan_dist, ncluster = k, iterate = 100)
+  medoid_man_cluster <- as.data.table(medoid_man$cluster)
+  setnames(medoid_man_cluster, "V1","cluster")
+  
+  manhattan_dist <- as.matrix(manhattan_dist)
+  cluster_dist <- as.data.table(manhattan_dist[,medoid_man$medoid])
+  
+  data <- copy(musk1) 
+  data <- cbind(musk1[,1:2],cluster_dist)
+  man_medoid_bagdata <- data[, lapply(.SD, mean), by=list(BagClass,BagId)]
+  
+  purity <- cbind(musk1[,1:2],medoid_man_cluster)
+  
+  purity_matrix <- as.data.table(dcast(purity, BagId ~ cluster, fun  = length ))
+  purity_sum <- dcast(purity, BagId ~ . , fun  = length )
+  p <- purity_matrix[,2:ncol(purity_matrix)] / purity_sum$.
+  purity_man_med <- sum(apply(p,1,max))/nrow(p)
+  
+  purity_man_med_2 <- rbind(purity_man_med_2, paste0('Purity metric for k = ' , k , ' is ',purity_man_med))
+
+  #generating arbitrary lambda2 sequences
+  lambda2=exp (seq (-7, 1, length = 20))
+  #  print(lambda2) #check what they are
+  #parameters to be tried is lambda1 for L1 penalty and lambda2 for L2 (fused lasso penalty)
+  #fixing lambda1 to 1, I try to find the optimal lambda2 value from the sequence
+  lambdas=list(1,lambda2)
+  
+  #run the logistic regression (binomial family for binary classification problem)
+  cvFused=cv.lqa(man_medoid_bagdata$BagClass,man_medoid_bagdata[,3:ncol(man_medoid_bagdata)],lambda.candidates = lambdas, intercept = FALSE,
+                 family=binomial(), penalty.family=fused.lasso,n.fold=10,loss.func = "dev.loss")
+  
+  #predictions 
+  cvFused$best.obj$fitted.values
+  k_legend <- rbind(k_legend,k)
+  k_color <- rbind(k_color,k)
+  
+  if (k == 3){
+    roc.curve(man_medoid_bagdata$BagClass, cvFused$best.obj$fitted.values, add.roc = FALSE , col = k, main = 'k-medoids with Manhattan Distance', cex.main = 0.6, cex.axis = 0.6  )
+    legend("bottomright",  legend = unique(k_legend$x), col = unique(k_color$x), lty = 1  , title = "Cluster for k = ",  xjust =1 , yjust=1, x.intersp = 0.2,y.intersp = 0.6, cex = 0.6)
+    auc_man_medoid <- rbind(auc_man_medoid,paste0('AUC for k = ',k,' is ', auc(man_medoid_bagdata$BagClass, cvFused$best.obj$fitted.values)))
+    
+  } else 
+  {
+    roc.curve(man_medoid_bagdata$BagClass, cvFused$best.obj$fitted.values, add.roc = TRUE , col = k , main = 'k-medoids with Manhattan Distance', cex.main = 0.6, cex.axis = 0.6  )
+    legend("bottomright",  legend = unique(k_legend$x), col = unique(k_color$x), lty = 1  , title = "Cluster for k = ",  xjust =1 , yjust=1, x.intersp = 0.2,y.intersp = 0.6, cex = 0.6)
+    auc_man_medoid <- rbind(auc_man_medoid,paste0('AUC for k = ',k,' is ', auc(man_medoid_bagdata$BagClass, cvFused$best.obj$fitted.values)))
+    
+  }
+  lambda_man_medoid <- rbind(lambda_man_medoid,paste0('Lambda2 value for k = ',k,' is ',cvFused$lambda.opt[2]))
+}
+
+```
+
+Hierarchical clustering with euclidean distance 
+ 
+```{r hier_euc_app, include= TRUE, eval= FALSE, echo= TRUE}
+hier_euc <- data.table()
+bag_data_hier_euc <- data.table()
+plot.new()
+#Manhattan distance 
+k_legend <- data.table()
+k_color <- data.table()
+auc_euc_hier <- data.table()
+lambda_euc_hier <- data.table()
+purity_hier_euc <- data.table()
+
+for (k in (3:5)){
+  hier <- hclust(as.dist(euclidean_dist),method="ward.D2")
+  hier <- cutree(hier, k = k )
+  hier_data <- copy(musk1)
+  #Add clusters to data 
+  hier_data <- cbind(musk1, hier)
+  
+  #Calcualate mean instance for each cluster 
+  hier_data_centroids <- hier_data[,3:ncol(hier_data)][, lapply(.SD,mean), by = hier]
+  hier_dist <- rbind(hier_data_centroids[,2:ncol(hier_data_centroids)], musk1[,3:ncol(musk1)])
+  
+  hier_dist_2 <- dist(hier_dist,method = "euclidean")
+  hier_dist_2 <- as.matrix(hier_dist_2)
+  hier_cluster_dist <- t(hier_dist_2[(nrow(musk1)+1):nrow(hier_dist_2),1:nrow(musk1)])
+  
+  hier_data_2 <- cbind(musk1[,1:2],hier_cluster_dist)
+  hier_bagdata <- hier_data_2[, lapply(.SD, mean), by=list(BagClass,BagId)]
+  
+  class_hier <- hier_bagdata$BagClass
+  #bagdata <- hier_bagdata[,2:ncol(hier_bagdata)]
+  
+  purity <- cbind(musk1[,1:2],hier_data$hier)
+  
+  purity_matrix <- as.data.table(dcast(purity, BagId ~ hier, fun  = length ))
+  purity_sum <- dcast(purity, BagId ~ . , fun  = length )
+  p <- purity_matrix[,2:ncol(purity_matrix)] / purity_sum$.
+  purity_2 <- sum(apply(p,1,max))/nrow(p)
+  
+  purity_hier_euc <- rbind(purity_hier_euc , paste0('Purity metric for k = ' , k , ' is ',purity_2 ))
+  
+
+  #generating arbitrary lambda2 sequences
+  lambda2=exp (seq (-7, 1, length = 20))
+  #  print(lambda2) #check what they are
+  #parameters to be tried is lambda1 for L1 penalty and lambda2 for L2 (fused lasso penalty)
+  #fixing lambda1 to 1, I try to find the optimal lambda2 value from the sequence
+  lambdas=list(1,lambda2)
+  
+  #run the logistic regression (binomial family for binary classification problem)
+  cvFused=cv.lqa(hier_bagdata$BagClass,hier_bagdata[,3:ncol(hier_bagdata)],lambda.candidates = lambdas, intercept = FALSE,
+                 family=binomial(), penalty.family=fused.lasso,n.fold=10,loss.func = "dev.loss")
+  
+  k_legend <- rbind(k_legend,k)
+  k_color <- rbind(k_color,k)
+  if (k == 3){
+    roc.curve(hier_bagdata$BagClass, cvFused$best.obj$fitted.values, add.roc = FALSE , col = k, main = 'Hierarchical Clustering with Euclidean Distance', cex.main = 0.6, cex.axis = 0.6  )
+    legend("bottomright",  legend = unique(k_legend$x), col = unique(k_color$x), lty = 1  , title = "Cluster for k = ",  xjust =1 , yjust=1, x.intersp = 0.2,y.intersp = 0.6, cex = 0.6)
+    auc_euc_hier <- rbind(auc_euc_hier,paste0('AUC for k = ',k,' is ', auc(hier_bagdata$BagClass, cvFused$best.obj$fitted.values)))
+    
+  } else 
+  {
+    roc.curve(hier_bagdata$BagClass, cvFused$best.obj$fitted.values, add.roc = TRUE , col = k , main = 'Hierarchical Clustering with Euclidean Distance', cex.main = 0.6, cex.axis = 0.6  )
+    legend("bottomright",  legend = unique(k_legend$x), col = unique(k_color$x), lty = 1  , title = "Cluster for k = ",  xjust =1 , yjust=1, x.intersp = 0.2,y.intersp = 0.6, cex = 0.6)
+    auc_euc_hier <- rbind(auc_euc_hier,paste0('AUC for k = ',k,' is ', auc(hier_bagdata$BagClass, cvFused$best.obj$fitted.values)))
+    
+  }
+  lambda_euc_hier <- rbind(lambda_euc_hier,paste0('Lambda2 value for k = ',k,' is ',cvFused$lambda.opt[2]))
+  
+}
+
+```
+ 
+Hierarchical clustering with manhattan distance 
+
+```{r hier_man_app, include= TRUE, eval= FALSE, echo= TRUE}
+#Hierarchical with manhattan distance
+plot.new()
+#Manhattan distance 
+k_legend <- data.table()
+k_color <- data.table()
+auc_man_hier <- data.table()
+lambda_man_hier <- data.table()
+hier_man <- data.table()
+bag_data_hier_man <- data.table()
+purity_hier_man <- data.table()
+
+rm(hier);
+rm(hier_data);
+rm(hier_dist);
+rm(hier_data_2);
+
+
+for (k in (3:5)){
+  hier <- hclust(as.dist(manhattan_dist),method="ward.D2")
+  hier <- cutree(hier, k = k )
+  hier_data <- copy(musk1)
+  #Add clusters to data 
+  hier_data <- cbind(musk1, hier)
+  
+  #Calcualate mean instance for each cluster 
+  hier_data_centroids <- hier_data[,3:ncol(hier_data)][, lapply(.SD,mean), by = hier]
+  hier_dist <- rbind(hier_data_centroids[,2:ncol(hier_data_centroids)], musk1[,3:ncol(musk1)])
+  
+  hier_dist_2 <- dist(hier_dist,method = "manhattan")
+  hier_dist_2 <- as.matrix(hier_dist_2)
+  hier_cluster_dist <- t(hier_dist_2[(nrow(musk1)+1):nrow(hier_dist_2),1:nrow(musk1)])
+  
+  hier_data_2 <- cbind(musk1[,1:2],hier_cluster_dist)
+  bag_data_hier_man <- hier_data_2[, lapply(.SD, mean), by=list(BagClass,BagId)]
+  
+  class_hier <- bag_data_hier_man$BagClass
+  bagdata <- bag_data_hier_man[,2:ncol(bag_data_hier_man)]
+  
+  
+  purity <- cbind(musk1[,1:2],hier_data$hier)
+  
+  purity_matrix <- as.data.table(dcast(purity, BagId ~ hier, fun  = length ))
+  purity_sum <- dcast(purity, BagId ~ . , fun  = length )
+  p <- purity_matrix[,2:ncol(purity_matrix)] / purity_sum$.
+  purity_2 <- sum(apply(p,1,max))/nrow(p)
+  
+  purity_hier_man <- rbind(purity_hier_man, paste0('Purity metric for k = ' , k , ' is ',purity_2 ))
+  
+  
+  #generating arbitrary lambda2 sequences
+  lambda2=exp(seq (-7, 1, length = 20))
+  #  print(lambda2) #check what they are
+  #parameters to be tried is lambda1 for L1 penalty and lambda2 for L2 (fused lasso penalty)
+  #fixing lambda1 to 1, I try to find the optimal lambda2 value from the sequence
+  lambdas=list(1,lambda2)
+  
+  #run the logistic regression (binomial family for binary classification problem)
+  cvFused=cv.lqa(bag_data_hier_man$BagClass,bag_data_hier_man[,3:ncol(bag_data_hier_man)],lambda.candidates = lambdas, intercept = FALSE,
+                 family=binomial(), penalty.family=fused.lasso,n.fold=10,loss.func = "dev.loss")
+  
+  #predictions 
+  cvFused$best.obj$fitted.values
+  k_legend <- rbind(k_legend,k)
+  k_color <- rbind(k_color,k)
+  
+  if (k == 3){
+    roc.curve(bag_data_hier_man$BagClass, cvFused$best.obj$fitted.values, add.roc = FALSE , col = k, main = 'Hierarchical Clustering with Manhattan Distance', cex.main = 0.6, cex.axis = 0.6  )
+    legend("bottomright",  legend = unique(k_legend$x), col = unique(k_color$x), lty = 1  , title = "Cluster for k = ",  xjust =1 , yjust=1, x.intersp = 0.2,y.intersp = 0.6, cex = 0.6)
+    auc_man_hier <- rbind(auc_man_hier,paste0('AUC for k = ',k,' is ', auc(bag_data_hier_man$BagClass, cvFused$best.obj$fitted.values)))
+    
+  } else 
+  {
+    roc.curve(bag_data_hier_man$BagClass, cvFused$best.obj$fitted.values, add.roc = TRUE , col = k , main = 'Hierarchical Clustering with Manhattan Distance', cex.main = 0.6, cex.axis = 0.6  )
+    legend("bottomright",  legend = unique(k_legend$x), col = unique(k_color$x), lty = 1  , title = "Cluster for k = ",  xjust =1 , yjust=1, x.intersp = 0.2,y.intersp = 0.6, cex = 0.6)
+    auc_man_hier <- rbind(auc_man_hier,paste0('AUC for k = ',k,' is ', auc(bag_data_hier_man$BagClass, cvFused$best.obj$fitted.values)))
+    
+  }
+  lambda_man_hier <- rbind(lambda_man_hier,paste0('Lambda2 value for k = ',k,' is ',cvFused$lambda.opt[2]))
+  
+}
+
+```
+
+
